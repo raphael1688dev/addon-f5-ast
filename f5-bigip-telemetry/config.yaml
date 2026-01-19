@@ -1,0 +1,46 @@
+name: "F5 BIG-IP Telemetry"
+version: "0.9.6"
+slug: "f5_bigip_telemetry"
+description: "F5 OTel Collector (Local Build, v0.9.6, All Modules)."
+url: "https://github.com/raphael1688dev/addon-f5-ast"
+arch:
+  - amd64
+startup: services
+options:
+  f5_host: "192.168.1.245"
+  f5_username: "admin"
+  f5_password: "admin"
+  collection_interval: "30s"
+  insecure_skip_verify: true
+  log_level: "info"
+  # --- 模組開關 (預設全關，需手動開啟) ---
+  enable_system: false
+  enable_ltm: false
+  enable_net: false
+  enable_asm: false
+  enable_gtm: false
+  enable_apm: false
+  enable_afm: false
+  enable_pem: false
+  enable_avr: false
+  enable_vcmp: false
+schema:
+  f5_host: str
+  f5_username: str
+  f5_password: password
+  collection_interval: str
+  insecure_skip_verify: bool
+  log_level: list(debug, info, warn, error)
+  # --- UI 定義 ---
+  enable_system: bool
+  enable_ltm: bool
+  enable_net: bool
+  enable_asm: bool
+  enable_gtm: bool
+  enable_apm: bool
+  enable_afm: bool
+  enable_pem: bool
+  enable_avr: bool
+  enable_vcmp: bool
+ports:
+  8888/tcp: 8888
