@@ -1,7 +1,7 @@
 name: "F5 BIG-IP Telemetry"
-version: "0.9.6-01"
+version: "0.9.6-02"
 slug: "f5_bigip_telemetry"
-description: "F5 OTel Collector (Local Build, v0.9.6, All Modules)."
+description: "F5 OTel Collector (Secure Password Support)."
 url: "https://github.com/raphael1688dev/addon-f5-ast"
 arch:
   - amd64
@@ -12,9 +12,11 @@ options:
   f5_password: "admin"
   collection_interval: "30s"
   insecure_skip_verify: true
-  log_level:           # <--- 重點 1: 預設值改成陣列格式
-    - info
-  # --- 模組開關 (預設全關，需手動開啟) ---
+  
+  # Log Level: debug, info, warn, error (Empty = info)
+  log_level: "info"
+
+  # --- Modules (Default False) ---
   enable_system: false
   enable_ltm: false
   enable_net: false
@@ -31,8 +33,11 @@ schema:
   f5_password: password
   collection_interval: str
   insecure_skip_verify: bool
-  log_level: list(debug, info, warn, error) # <--- 重點 2: 產生選單
-  # --- UI 定義 ---
+  
+  # Input for Log Level
+  log_level: str
+  
+  # --- Modules Schema ---
   enable_system: bool
   enable_ltm: bool
   enable_net: bool
