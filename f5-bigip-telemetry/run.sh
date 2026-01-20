@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "Starting F5 Telemetry All-in-One (v2.0.8 Final Fix)..."
+echo "Starting F5 Telemetry All-in-One (v2.0.9 Connection Doctor)..."
 
 CONFIG_PATH="/data/options.json"
 DATA_DIR="/data/prometheus"
@@ -21,8 +21,7 @@ scrape_configs:
       - targets: ["localhost:9090"]
 EOF
 
-echo "Starting Built-in Prometheus (Official v2.50.1)..."
-# 注意：這裡保留 --web.enable-remote-write-receiver，這是 OTel 推送數據的關鍵
+echo "Starting Built-in Prometheus..."
 /usr/local/bin/prometheus \
     --config.file=/etc/prometheus/prometheus.yml \
     --storage.tsdb.path="$DATA_DIR" \
@@ -66,13 +65,45 @@ ENABLE_AFM=$(jq --raw-output '.enable_afm' $CONFIG_PATH)
 
 echo "Target F5: $HOST"
 echo "Log Level: $LOG"
-echo "Filter Regex: $FILTER_REGEX"
 
-# --- 3. Generate OTel Config (Using JQ for Password Safety) ---
+# --- [關鍵新增] Connection Doctor 診斷程序 ---
+echo "========================================="
+echo "   Running F5 Connection Diagnostics...  "
+echo "========================================="
 
-# [關鍵修正] 使用 jq -R . 將密碼轉為 JSON String 格式 (會自動加上前後引號並處理轉義)
-# 例如: pass"word -> "pass\"word"
-# 這樣直接放入 YAML 就絕對安全了
+# 1. 測試 Token 獲取 (這模擬了 Collector 登入的第一步)
+echo "Attempting to get Auth Token from F5 ($HOST)..."
+
+# 建構 JSON payload
+JSON_PAYLOAD=$(jq -n --arg u "$USER" --arg p "$PASS" '{username: $u, password: $p, loginProviderName: "tmos"}')
+
+# 執行 Curl (使用 -k 忽略憑證, -v 顯示詳細連線過程)
+RESPONSE=$(curl -k -s -w "\nHTTP_CODE:%{http_code}" --connect-timeout 10 \
+  -H "Content-Type: application/json" \
+  -X POST "https://$HOST/mgmt/shared/authn/login" \
+  -d "$JSON_PAYLOAD")
+
+HTTP_CODE=$(echo "$RESPONSE" | grep "HTTP_CODE" | cut -d':' -f2)
+BODY=$(echo "$RESPONSE" | sed 's/HTTP_CODE.*//')
+
+echo "-----------------------------------------"
+echo "Diagnostic Result:"
+if [ "$HTTP_CODE" == "200" ]; then
+  echo "✅ SUCCESS: Login Successful! (HTTP 200)"
+  echo "Token received. Network and Credentials are OK."
+else
+  echo "❌ FAILED: Login Failed with HTTP Code $HTTP_CODE"
+  echo "Response Body: $BODY"
+  echo ""
+  echo "Possible Causes:"
+  echo " - 401: Wrong Password or Username."
+  echo " - 404: F5 API endpoint not found (Wrong IP?)."
+  echo " - 000: Connection Timeout (Firewall/Network issue)."
+fi
+echo "========================================="
+# ---------------------------------------------
+
+# --- 3. Generate OTel Config ---
 SAFE_PASS=$(echo "$PASS" | jq -R .)
 
 cat <<EOF > /app/otel-config.yaml
@@ -104,10 +135,6 @@ service:
   telemetry:
     logs:
       level: "${LOG}"
-    # [修正] 移除導致報錯的 metrics address 設定
-    # metrics:
-    #   address: "0.0.0.0:8888"
-
   pipelines:
     metrics:
       receivers: [bigip]
