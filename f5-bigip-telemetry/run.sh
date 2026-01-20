@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "Starting F5 Telemetry All-in-One (v2.1.4 Final Success)..."
+echo "Starting F5 Telemetry All-in-One (v2.1.6 Smart Filter)..."
 
 CONFIG_PATH="/data/options.json"
 DATA_DIR="/data/prometheus"
@@ -46,14 +46,43 @@ RAW_LOG=$(jq --raw-output '.log_level' $CONFIG_PATH)
 if [[ -z "$RAW_LOG" ]] || [[ "$RAW_LOG" == "null" ]]; then LOG="info"; else LOG=$(echo "$RAW_LOG" | tr '[:upper:]' '[:lower:]'); fi
 if [[ ! "$LOG" =~ ^(debug|info|warn|error)$ ]]; then LOG="info"; fi
 
-# --- [關鍵修正] Filter Regex ---
-# 改為最寬鬆的規則：只要是 bigip 開頭的指標，全部放行！
-# 這保證了 Grafana 一定會有資料
-FILTER_REGEX="bigip.*"
+# --- [關鍵修正] Smart Regex Construction ---
+# 基礎：永遠保留 Scraper 自身的 metrics
+# (f5|bigip) 匹配開頭
+# [._] 匹配分隔符號
+FILTER_REGEX="(f5|bigip)[._]scraper.*"
+
+# System Module (CPU, Memory, Disk)
+ENABLE_SYSTEM=$(jq --raw-output '.enable_system' $CONFIG_PATH)
+[ "$ENABLE_SYSTEM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|(f5|bigip)[._](cpu|memory|system|disk|filesystem).*"
+
+# LTM Module (VS, Pool, Node, iRules)
+ENABLE_LTM=$(jq --raw-output '.enable_ltm' $CONFIG_PATH)
+[ "$ENABLE_LTM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|(f5|bigip)[._](virtual_server|pool|node|rule).*"
+
+# Network Module (Interface, VLAN)
+ENABLE_NET=$(jq --raw-output '.enable_net' $CONFIG_PATH)
+[ "$ENABLE_NET" == "true" ] && FILTER_REGEX="$FILTER_REGEX|(f5|bigip)[._](interface|vlan|arp).*"
+
+# ASM / WAF Module
+ENABLE_ASM=$(jq --raw-output '.enable_asm' $CONFIG_PATH)
+[ "$ENABLE_ASM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|(f5|bigip)[._]asm.*"
+
+# GTM / DNS Module
+ENABLE_GTM=$(jq --raw-output '.enable_gtm' $CONFIG_PATH)
+[ "$ENABLE_GTM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|(f5|bigip)[._](gtm|wideip|dns).*"
+
+# APM / Access Module
+ENABLE_APM=$(jq --raw-output '.enable_apm' $CONFIG_PATH)
+[ "$ENABLE_APM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|(f5|bigip)[._](apm|access).*"
+
+# AFM / Firewall Module
+ENABLE_AFM=$(jq --raw-output '.enable_afm' $CONFIG_PATH)
+[ "$ENABLE_AFM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|(f5|bigip)[._](afm|firewall|dos).*"
 
 echo "Target F5: $HOST"
 echo "Log Level: $LOG"
-echo "Filter Regex: $FILTER_REGEX (Allow All)"
+echo "Active Filter Regex: $FILTER_REGEX"
 
 # --- 3. Generate OTel Config ---
 SAFE_PASS=$(echo "$PASS" | jq -R .)
