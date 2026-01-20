@@ -89,10 +89,10 @@ BODY=$(echo "$RESPONSE" | sed 's/HTTP_CODE.*//')
 echo "-----------------------------------------"
 echo "Diagnostic Result:"
 if [ "$HTTP_CODE" == "200" ]; then
-  echo "✅ SUCCESS: Login Successful! (HTTP 200)"
+  echo "SUCCESS: Login Successful! (HTTP 200)"
   echo "Token received. Network and Credentials are OK."
 else
-  echo "❌ FAILED: Login Failed with HTTP Code $HTTP_CODE"
+  echo "FAILED: Login Failed with HTTP Code $HTTP_CODE"
   echo "Response Body: $BODY"
   echo ""
   echo "Possible Causes:"
