@@ -1,14 +1,13 @@
 #!/bin/bash
 set -e
 
-echo "Starting F5 Telemetry All-in-One (v2.0.5 Official Binary)..."
+echo "Starting F5 Telemetry All-in-One (v2.0.6 Metrics Fix)..."
 
 CONFIG_PATH="/data/options.json"
 DATA_DIR="/data/prometheus"
 
 # --- 1. Start Internal Prometheus ---
 mkdir -p "$DATA_DIR"
-# 確保設定檔目錄存在
 mkdir -p /etc/prometheus
 
 # Generate Prometheus Config
@@ -23,12 +22,6 @@ scrape_configs:
 EOF
 
 echo "Starting Built-in Prometheus (Official v2.50.1)..."
-
-# 使用官方 Binary 啟動
-# 參數說明：
-# --web.enable-remote-write-receiver: 允許 OTel 寫入資料 (現在一定支援了)
-# --web.enable-lifecycle: 允許熱重載
-# --web.listen-address: 允許外部連線
 /usr/local/bin/prometheus \
     --config.file=/etc/prometheus/prometheus.yml \
     --storage.tsdb.path="$DATA_DIR" \
@@ -39,7 +32,6 @@ echo "Starting Built-in Prometheus (Official v2.50.1)..."
     --web.listen-address="0.0.0.0:9090" \
     &
 
-# Wait for Prometheus to be ready
 sleep 5
 
 # --- 2. Prepare F5 OTel Collector ---
@@ -67,53 +59,4 @@ ENABLE_ASM=$(jq --raw-output '.enable_asm' $CONFIG_PATH)
 ENABLE_GTM=$(jq --raw-output '.enable_gtm' $CONFIG_PATH)
 [ "$ENABLE_GTM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip\.(gtm|wideip|dns).*"
 ENABLE_APM=$(jq --raw-output '.enable_apm' $CONFIG_PATH)
-[ "$ENABLE_APM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip\.(apm|access).*"
-ENABLE_AFM=$(jq --raw-output '.enable_afm' $CONFIG_PATH)
-[ "$ENABLE_AFM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip\.(afm|firewall|dos).*"
-
-echo "Target F5: $HOST"
-echo "Log Level: $LOG"
-echo "Filter Regex: $FILTER_REGEX"
-
-# --- 3. Generate Config with Safe Password Injection ---
-cat <<EOF > /app/otel-config-template.yaml
-receivers:
-  bigip:
-    endpoint: "https://${HOST}"
-    username: "${USER}"
-    password: "PLACEHOLDER_PASSWORD"
-    collection_interval: "${INTERVAL}"
-    timeout: 30s
-    tls:
-      insecure_skip_verify: ${VERIFY}
-
-processors:
-  filter:
-    metrics:
-      include:
-        match_type: regexp
-        metric_names:
-          - '${FILTER_REGEX}'
-
-exporters:
-  prometheusremotewrite:
-    endpoint: "http://127.0.0.1:9090/api/v1/write"
-    tls:
-      insecure: true
-
-service:
-  telemetry:
-    logs:
-      level: "${LOG}"
-  pipelines:
-    metrics:
-      receivers: [bigip]
-      processors: [filter]
-      exporters: [prometheusremotewrite]
-EOF
-
-ESCAPED_PASS=$(printf '%s\n' "$PASS" | sed 's/[&/\]/\\&/g')
-sed "s/PLACEHOLDER_PASSWORD/$ESCAPED_PASS/" /app/otel-config-template.yaml > /app/otel-config.yaml
-
-echo "Starting F5 OTel Collector..."
-exec /usr/local/bin/otelcol-custom --config /app/otel-config.yaml
+[ "$ENABLE_AP
