@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "Starting F5 Telemetry All-in-One (v2.0.9 Connection Doctor)..."
+echo "Starting F5 Telemetry All-in-One (v2.1.0 Deep Scan)..."
 
 CONFIG_PATH="/data/options.json"
 DATA_DIR="/data/prometheus"
@@ -34,7 +34,7 @@ echo "Starting Built-in Prometheus..."
 
 sleep 5
 
-# --- 2. Prepare F5 OTel Collector ---
+# --- 2. Prepare Config Variables ---
 HOST=$(jq --raw-output '.f5_host' $CONFIG_PATH)
 USER=$(jq --raw-output '.f5_username' $CONFIG_PATH)
 PASS=$(jq --raw-output '.f5_password' $CONFIG_PATH)
@@ -66,42 +66,52 @@ ENABLE_AFM=$(jq --raw-output '.enable_afm' $CONFIG_PATH)
 echo "Target F5: $HOST"
 echo "Log Level: $LOG"
 
-# --- [關鍵新增] Connection Doctor 診斷程序 ---
+# --- [Deep Scan] Connection & Permission Diagnostics ---
 echo "========================================="
-echo "   Running F5 Connection Diagnostics...  "
+echo "   Running Deep Connection Diagnostics   "
 echo "========================================="
 
-# 1. 測試 Token 獲取 (這模擬了 Collector 登入的第一步)
-echo "Attempting to get Auth Token from F5 ($HOST)..."
-
-# 建構 JSON payload
+# 1. Login to get Token
+echo "Step 1: Attempting Login..."
 JSON_PAYLOAD=$(jq -n --arg u "$USER" --arg p "$PASS" '{username: $u, password: $p, loginProviderName: "tmos"}')
-
-# 執行 Curl (使用 -k 忽略憑證, -v 顯示詳細連線過程)
-RESPONSE=$(curl -k -s -w "\nHTTP_CODE:%{http_code}" --connect-timeout 10 \
+LOGIN_RESPONSE=$(curl -k -s -w "\nHTTP_CODE:%{http_code}" --connect-timeout 10 \
   -H "Content-Type: application/json" \
   -X POST "https://$HOST/mgmt/shared/authn/login" \
   -d "$JSON_PAYLOAD")
 
-HTTP_CODE=$(echo "$RESPONSE" | grep "HTTP_CODE" | cut -d':' -f2)
-BODY=$(echo "$RESPONSE" | sed 's/HTTP_CODE.*//')
+LOGIN_CODE=$(echo "$LOGIN_RESPONSE" | grep "HTTP_CODE" | cut -d':' -f2)
+TOKEN=$(echo "$LOGIN_RESPONSE" | sed 's/HTTP_CODE.*//' | jq -r .token.token)
 
-echo "-----------------------------------------"
-echo "Diagnostic Result:"
-if [ "$HTTP_CODE" == "200" ]; then
-  echo "SUCCESS: Login Successful! (HTTP 200)"
-  echo "Token received. Network and Credentials are OK."
+if [ "$LOGIN_CODE" == "200" ] && [ "$TOKEN" != "null" ]; then
+  echo "✅ Login Successful! (Token acquired)"
+  
+  # 2. Test Data Read Permission (Reading System Hostname)
+  echo "Step 2: Testing Read Permissions (fetching /mgmt/tm/sys/global-host-name)..."
+  DATA_RESPONSE=$(curl -k -s -w "\nHTTP_CODE:%{http_code}" --connect-timeout 10 \
+    -H "X-F5-Auth-Token: $TOKEN" \
+    -X GET "https://$HOST/mgmt/tm/sys/global-host-name")
+    
+  DATA_CODE=$(echo "$DATA_RESPONSE" | grep "HTTP_CODE" | cut -d':' -f2)
+  DATA_BODY=$(echo "$DATA_RESPONSE" | sed 's/HTTP_CODE.*//')
+
+  if [ "$DATA_CODE" == "200" ]; then
+    echo "Data Read Successful! (HTTP 200)"
+    echo "Sample Data: $(echo $DATA_BODY | jq -r .name 2>/dev/null || echo 'Raw JSON received')"
+    echo "-----------------------------------------"
+    echo "CONCLUSION: Credentials AND Permissions are PERFECT."
+    echo "If no data in Grafana, the issue is strictly inside OTel Config/Filter."
+  else
+    echo "Data Read FAILED! (HTTP $DATA_CODE)"
+    echo "Response: $DATA_BODY"
+    echo "-----------------------------------------"
+    echo "CONCLUSION: Login worked, but Reading Data failed."
+    echo "Please check F5 User Role. Ensure it is 'Administrator' or has iControl REST access."
+  fi
+
 else
-  echo "FAILED: Login Failed with HTTP Code $HTTP_CODE"
-  echo "Response Body: $BODY"
-  echo ""
-  echo "Possible Causes:"
-  echo " - 401: Wrong Password or Username."
-  echo " - 404: F5 API endpoint not found (Wrong IP?)."
-  echo " - 000: Connection Timeout (Firewall/Network issue)."
+  echo "Login FAILED with Code $LOGIN_CODE"
 fi
 echo "========================================="
-# ---------------------------------------------
 
 # --- 3. Generate OTel Config ---
 SAFE_PASS=$(echo "$PASS" | jq -R .)
