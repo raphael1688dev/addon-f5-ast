@@ -1,5 +1,5 @@
 name: "F5 BIG-IP Telemetry (AST+Prometheus)"
-version: "0.9.6-11"
+version: "0.9.6-12"
 slug: "f5_bigip_telemetry_aio"
 description: "F5 OTel Collector + Built-in Prometheus."
 url: "https://github.com/raphael1688dev/addon-f5-ast"
