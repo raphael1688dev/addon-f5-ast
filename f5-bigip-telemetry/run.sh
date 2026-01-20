@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "Starting F5 Telemetry All-in-One (v2.0.6 Metrics Fix)..."
+echo "Starting F5 Telemetry All-in-One (v2.0.8 Final Fix)..."
 
 CONFIG_PATH="/data/options.json"
 DATA_DIR="/data/prometheus"
@@ -22,6 +22,7 @@ scrape_configs:
 EOF
 
 echo "Starting Built-in Prometheus (Official v2.50.1)..."
+# 注意：這裡保留 --web.enable-remote-write-receiver，這是 OTel 推送數據的關鍵
 /usr/local/bin/prometheus \
     --config.file=/etc/prometheus/prometheus.yml \
     --storage.tsdb.path="$DATA_DIR" \
@@ -67,13 +68,19 @@ echo "Target F5: $HOST"
 echo "Log Level: $LOG"
 echo "Filter Regex: $FILTER_REGEX"
 
-# --- 3. Generate Config with Safe Password Injection ---
-cat <<EOF > /app/otel-config-template.yaml
+# --- 3. Generate OTel Config (Using JQ for Password Safety) ---
+
+# [關鍵修正] 使用 jq -R . 將密碼轉為 JSON String 格式 (會自動加上前後引號並處理轉義)
+# 例如: pass"word -> "pass\"word"
+# 這樣直接放入 YAML 就絕對安全了
+SAFE_PASS=$(echo "$PASS" | jq -R .)
+
+cat <<EOF > /app/otel-config.yaml
 receivers:
   bigip:
     endpoint: "https://${HOST}"
     username: "${USER}"
-    password: "PLACEHOLDER_PASSWORD"
+    password: ${SAFE_PASS}
     collection_interval: "${INTERVAL}"
     timeout: 30s
     tls:
@@ -97,8 +104,9 @@ service:
   telemetry:
     logs:
       level: "${LOG}"
-    metrics:
-      address: "0.0.0.0:8888"    # <--- [關鍵修正] 開放 8888 讓外部除錯
+    # [修正] 移除導致報錯的 metrics address 設定
+    # metrics:
+    #   address: "0.0.0.0:8888"
 
   pipelines:
     metrics:
@@ -106,9 +114,6 @@ service:
       processors: [filter]
       exporters: [prometheusremotewrite]
 EOF
-
-ESCAPED_PASS=$(printf '%s\n' "$PASS" | sed 's/[&/\]/\\&/g')
-sed "s/PLACEHOLDER_PASSWORD/$ESCAPED_PASS/" /app/otel-config-template.yaml > /app/otel-config.yaml
 
 echo "Starting F5 OTel Collector..."
 exec /usr/local/bin/otelcol-custom --config /app/otel-config.yaml
