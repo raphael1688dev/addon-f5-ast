@@ -1,9 +1,10 @@
 # F5 BIG-IP Telemetry
 
 **Setup Instructions:**
-1. Install this Add-on.
-2. Go to the **Configuration** tab.
-3. Set your F5 IP address.
-4. **IMPORTANT:** You MUST enable at least one module (e.g., check `enable_system` and `enable_ltm`), otherwise no data will be collected.
-5. Start the Add-on.
-6. Configure Prometheus to scrape port `8888` of this container.
+1. Install Add-on.
+2. Go to **Configuration**.
+3. Enter F5 IP, Username, and Password.
+   * *Note: Passwords with special characters (e.g., $, ", \) are fully supported.*
+4. **Log Level:** Optional. Defaults to `info` if left blank.
+5. **IMPORTANT:** You MUST enable at least one module (e.g., `enable_system` and `enable_ltm`), or no data will be collected.
+6. Start.
