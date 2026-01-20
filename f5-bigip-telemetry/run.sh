@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "Starting F5 Telemetry All-in-One (v2.1.2 Regex Fix)..."
+echo "Starting F5 Telemetry All-in-One (v2.1.3 God Mode)..."
 
 CONFIG_PATH="/data/options.json"
 DATA_DIR="/data/prometheus"
@@ -40,81 +40,32 @@ USER=$(jq --raw-output '.f5_username' $CONFIG_PATH)
 PASS=$(jq --raw-output '.f5_password' $CONFIG_PATH)
 INTERVAL=$(jq --raw-output '.collection_interval' $CONFIG_PATH)
 VERIFY=$(jq --raw-output '.insecure_skip_verify' $CONFIG_PATH)
-
-# Log Level
 RAW_LOG=$(jq --raw-output '.log_level' $CONFIG_PATH)
-if [[ -z "$RAW_LOG" ]] || [[ "$RAW_LOG" == "null" ]]; then LOG="info"; else LOG=$(echo "$RAW_LOG" | tr '[:upper:]' '[:lower:]'); fi
-if [[ ! "$LOG" =~ ^(debug|info|warn|error)$ ]]; then LOG="info"; fi
 
-# --- [關鍵修正] Regex Generation (支援 Dot . 與 Underscore _) ---
-# 使用 [._] 來同時匹配 . 和 _
+# Force Debug Level for this test
+LOG="debug"
+
+# Regex (Keep the fix)
 FILTER_REGEX="bigip[._]scraper.*"
-
 ENABLE_SYSTEM=$(jq --raw-output '.enable_system' $CONFIG_PATH)
 [ "$ENABLE_SYSTEM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._](cpu|memory|system|disk|filesystem).*"
-
 ENABLE_LTM=$(jq --raw-output '.enable_ltm' $CONFIG_PATH)
 [ "$ENABLE_LTM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._](virtual_server|pool|node|rule).*"
-
 ENABLE_NET=$(jq --raw-output '.enable_net' $CONFIG_PATH)
 [ "$ENABLE_NET" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._](interface|vlan|arp).*"
-
 ENABLE_ASM=$(jq --raw-output '.enable_asm' $CONFIG_PATH)
 [ "$ENABLE_ASM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._]asm.*"
-
 ENABLE_GTM=$(jq --raw-output '.enable_gtm' $CONFIG_PATH)
 [ "$ENABLE_GTM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._](gtm|wideip|dns).*"
-
 ENABLE_APM=$(jq --raw-output '.enable_apm' $CONFIG_PATH)
 [ "$ENABLE_APM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._](apm|access).*"
-
 ENABLE_AFM=$(jq --raw-output '.enable_afm' $CONFIG_PATH)
 [ "$ENABLE_AFM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._](afm|firewall|dos).*"
 
 echo "Target F5: $HOST"
 echo "Log Level: $LOG"
-echo "Filter Regex: $FILTER_REGEX"
 
-# --- [Diagnostics] ---
-echo "========================================="
-echo "   Running Connection Check              "
-echo "========================================="
-
-# 1. Login
-echo "Step 1: Attempting Login..."
-JSON_PAYLOAD=$(jq -n --arg u "$USER" --arg p "$PASS" '{username: $u, password: $p, loginProviderName: "tmos"}')
-LOGIN_RESPONSE=$(curl -k -s -w "\nHTTP_CODE:%{http_code}" --connect-timeout 10 \
-  -H "Content-Type: application/json" \
-  -X POST "https://$HOST/mgmt/shared/authn/login" \
-  -d "$JSON_PAYLOAD")
-
-LOGIN_CODE=$(echo "$LOGIN_RESPONSE" | grep "HTTP_CODE" | cut -d':' -f2)
-TOKEN=$(echo "$LOGIN_RESPONSE" | sed 's/HTTP_CODE.*//' | jq -r .token.token)
-
-if [ "$LOGIN_CODE" == "200" ] && [ "$TOKEN" != "null" ]; then
-  echo "✅ Login Successful!"
-  
-  # 2. Test Data Read
-  echo "Step 2: Testing Read Permissions (/mgmt/tm/sys/global-settings)..."
-  DATA_RESPONSE=$(curl -k -s -w "\nHTTP_CODE:%{http_code}" --connect-timeout 10 \
-    -H "X-F5-Auth-Token: $TOKEN" \
-    -X GET "https://$HOST/mgmt/tm/sys/global-settings")
-    
-  DATA_CODE=$(echo "$DATA_RESPONSE" | grep "HTTP_CODE" | cut -d':' -f2)
-  DATA_BODY=$(echo "$DATA_RESPONSE" | sed 's/HTTP_CODE.*//')
-
-  if [ "$DATA_CODE" == "200" ]; then
-    echo "✅ Data Read Successful!"
-    echo "Hostname: $(echo $DATA_BODY | jq -r .hostname 2>/dev/null)"
-  else
-    echo "❌ Data Read FAILED! (HTTP $DATA_CODE)"
-  fi
-else
-  echo "❌ Login FAILED with Code $LOGIN_CODE"
-fi
-echo "========================================="
-
-# --- 3. Generate OTel Config ---
+# --- 3. Generate OTel Config with DEBUG Exporter ---
 SAFE_PASS=$(echo "$PASS" | jq -R .)
 
 cat <<EOF > /app/otel-config.yaml
@@ -137,10 +88,15 @@ processors:
           - '${FILTER_REGEX}'
 
 exporters:
+  # 1. Real output
   prometheusremotewrite:
     endpoint: "http://127.0.0.1:9090/api/v1/write"
     tls:
       insecure: true
+  
+  # 2. Debug output (Print everything to console)
+  debug:
+    verbosity: detailed
 
 service:
   telemetry:
@@ -149,9 +105,11 @@ service:
   pipelines:
     metrics:
       receivers: [bigip]
-      processors: [filter]
-      exporters: [prometheusremotewrite]
+      # 暫時移除 Filter，看看是不是 Filter 寫錯導致擋光光
+      # processors: [filter] 
+      processors: [] 
+      exporters: [prometheusremotewrite, debug]
 EOF
 
-echo "Starting F5 OTel Collector..."
+echo "Starting F5 OTel Collector (Debug Mode)..."
 exec /usr/local/bin/otelcol-custom --config /app/otel-config.yaml
