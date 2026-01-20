@@ -4,14 +4,13 @@ set -e
 echo "Starting F5 Telemetry All-in-One (OTel + Prometheus)..."
 
 CONFIG_PATH="/data/options.json"
-DATA_DIR="/data/prometheus" # 持久化資料目錄
+DATA_DIR="/data/prometheus"
 
 # 1. Prepare Prometheus Environment
 mkdir -p "$DATA_DIR"
-chown -R nobody:nogroup "$DATA_DIR" # 確保權限正確
+chown -R nobody:nogroup "$DATA_DIR"
 
-# 產生 Prometheus 設定檔 (最小化設定)
-# 注意：我們開啟了 remote-write receiver，這樣 OTel 才能寫入
+# Generate Prometheus Config
 cat <<EOF > /etc/prometheus/prometheus.yml
 global:
   scrape_interval: 15s
@@ -24,9 +23,6 @@ scrape_configs:
 EOF
 
 echo "Starting Built-in Prometheus..."
-# 啟動 Prometheus 放在背景 (&)
-# --web.enable-remote-write-receiver: 關鍵！允許 OTel 推資料進來
-# --storage.tsdb.path: 關鍵！資料存在 /data 才不會消失
 nohup /usr/bin/prometheus \
     --config.file=/etc/prometheus/prometheus.yml \
     --storage.tsdb.path="$DATA_DIR" \
@@ -36,7 +32,6 @@ nohup /usr/bin/prometheus \
     --web.enable-remote-write-receiver \
     > /var/log/prometheus.log 2>&1 &
 
-# 等待 5 秒確保 Prometheus 啟動完成
 sleep 5
 
 # --- 2. Prepare OTel Collector ---
@@ -82,7 +77,7 @@ echo "Internal Prometheus: http://127.0.0.1:9090/api/v1/write"
 echo "Filter Regex: $FILTER_REGEX"
 
 # Generate OTel Config
-# 重點：Endpoint 指向本機 localhost:9090
+# [關鍵修正] metric_names 使用單引號，避免 YAML 解析 Regex 的反斜線時報錯
 cat <<EOF > /app/otel-config.yaml
 receivers:
   bigip:
@@ -99,7 +94,7 @@ processors:
       include:
         match_type: regexp
         metric_names:
-          - "${FILTER_REGEX}"
+          - '${FILTER_REGEX}'   # <--- 這裡改成了單引號！
 
 exporters:
   prometheusremotewrite:
