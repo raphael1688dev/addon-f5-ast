@@ -1,14 +1,15 @@
 #!/bin/bash
 set -e
 
-echo "Starting F5 Telemetry All-in-One (v2.0.4 Fix)..."
+echo "Starting F5 Telemetry All-in-One (v2.0.5 Official Binary)..."
 
 CONFIG_PATH="/data/options.json"
 DATA_DIR="/data/prometheus"
 
 # --- 1. Start Internal Prometheus ---
-# [修正 1] 移除 chown nobody，直接使用 Root 權限，避免權限錯誤導致崩潰
 mkdir -p "$DATA_DIR"
+# 確保設定檔目錄存在
+mkdir -p /etc/prometheus
 
 # Generate Prometheus Config
 cat <<EOF > /etc/prometheus/prometheus.yml
@@ -21,12 +22,14 @@ scrape_configs:
       - targets: ["localhost:9090"]
 EOF
 
-echo "Starting Built-in Prometheus..."
+echo "Starting Built-in Prometheus (Official v2.50.1)..."
 
-# [修正 2] 
-# 1. 加入 --web.listen-address="0.0.0.0:9090" 確保外部可連
-# 2. 移除 > /var/log/... 的重導向，讓 Log 直接顯示在螢幕上，方便除錯
-/usr/bin/prometheus \
+# 使用官方 Binary 啟動
+# 參數說明：
+# --web.enable-remote-write-receiver: 允許 OTel 寫入資料 (現在一定支援了)
+# --web.enable-lifecycle: 允許熱重載
+# --web.listen-address: 允許外部連線
+/usr/local/bin/prometheus \
     --config.file=/etc/prometheus/prometheus.yml \
     --storage.tsdb.path="$DATA_DIR" \
     --web.console.libraries=/etc/prometheus/console_libraries \
