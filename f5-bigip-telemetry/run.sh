@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "Starting F5 Telemetry All-in-One (v2.1.3 God Mode)..."
+echo "Starting F5 Telemetry All-in-One (v2.1.4 Final Success)..."
 
 CONFIG_PATH="/data/options.json"
 DATA_DIR="/data/prometheus"
@@ -40,32 +40,22 @@ USER=$(jq --raw-output '.f5_username' $CONFIG_PATH)
 PASS=$(jq --raw-output '.f5_password' $CONFIG_PATH)
 INTERVAL=$(jq --raw-output '.collection_interval' $CONFIG_PATH)
 VERIFY=$(jq --raw-output '.insecure_skip_verify' $CONFIG_PATH)
+
+# Log Level
 RAW_LOG=$(jq --raw-output '.log_level' $CONFIG_PATH)
+if [[ -z "$RAW_LOG" ]] || [[ "$RAW_LOG" == "null" ]]; then LOG="info"; else LOG=$(echo "$RAW_LOG" | tr '[:upper:]' '[:lower:]'); fi
+if [[ ! "$LOG" =~ ^(debug|info|warn|error)$ ]]; then LOG="info"; fi
 
-# Force Debug Level for this test
-LOG="debug"
-
-# Regex (Keep the fix)
-FILTER_REGEX="bigip[._]scraper.*"
-ENABLE_SYSTEM=$(jq --raw-output '.enable_system' $CONFIG_PATH)
-[ "$ENABLE_SYSTEM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._](cpu|memory|system|disk|filesystem).*"
-ENABLE_LTM=$(jq --raw-output '.enable_ltm' $CONFIG_PATH)
-[ "$ENABLE_LTM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._](virtual_server|pool|node|rule).*"
-ENABLE_NET=$(jq --raw-output '.enable_net' $CONFIG_PATH)
-[ "$ENABLE_NET" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._](interface|vlan|arp).*"
-ENABLE_ASM=$(jq --raw-output '.enable_asm' $CONFIG_PATH)
-[ "$ENABLE_ASM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._]asm.*"
-ENABLE_GTM=$(jq --raw-output '.enable_gtm' $CONFIG_PATH)
-[ "$ENABLE_GTM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._](gtm|wideip|dns).*"
-ENABLE_APM=$(jq --raw-output '.enable_apm' $CONFIG_PATH)
-[ "$ENABLE_APM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._](apm|access).*"
-ENABLE_AFM=$(jq --raw-output '.enable_afm' $CONFIG_PATH)
-[ "$ENABLE_AFM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._](afm|firewall|dos).*"
+# --- [關鍵修正] Filter Regex ---
+# 改為最寬鬆的規則：只要是 bigip 開頭的指標，全部放行！
+# 這保證了 Grafana 一定會有資料
+FILTER_REGEX="bigip.*"
 
 echo "Target F5: $HOST"
 echo "Log Level: $LOG"
+echo "Filter Regex: $FILTER_REGEX (Allow All)"
 
-# --- 3. Generate OTel Config with DEBUG Exporter ---
+# --- 3. Generate OTel Config ---
 SAFE_PASS=$(echo "$PASS" | jq -R .)
 
 cat <<EOF > /app/otel-config.yaml
@@ -88,15 +78,10 @@ processors:
           - '${FILTER_REGEX}'
 
 exporters:
-  # 1. Real output
   prometheusremotewrite:
     endpoint: "http://127.0.0.1:9090/api/v1/write"
     tls:
       insecure: true
-  
-  # 2. Debug output (Print everything to console)
-  debug:
-    verbosity: detailed
 
 service:
   telemetry:
@@ -105,11 +90,9 @@ service:
   pipelines:
     metrics:
       receivers: [bigip]
-      # 暫時移除 Filter，看看是不是 Filter 寫錯導致擋光光
-      # processors: [filter] 
-      processors: [] 
-      exporters: [prometheusremotewrite, debug]
+      processors: [filter]
+      exporters: [prometheusremotewrite]
 EOF
 
-echo "Starting F5 OTel Collector (Debug Mode)..."
+echo "Starting F5 OTel Collector..."
 exec /usr/local/bin/otelcol-custom --config /app/otel-config.yaml
