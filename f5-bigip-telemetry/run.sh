@@ -59,4 +59,56 @@ ENABLE_ASM=$(jq --raw-output '.enable_asm' $CONFIG_PATH)
 ENABLE_GTM=$(jq --raw-output '.enable_gtm' $CONFIG_PATH)
 [ "$ENABLE_GTM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip\.(gtm|wideip|dns).*"
 ENABLE_APM=$(jq --raw-output '.enable_apm' $CONFIG_PATH)
-[ "$ENABLE_AP
+[ "$ENABLE_APM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip\.(apm|access).*"
+ENABLE_AFM=$(jq --raw-output '.enable_afm' $CONFIG_PATH)
+[ "$ENABLE_AFM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip\.(afm|firewall|dos).*"
+
+echo "Target F5: $HOST"
+echo "Log Level: $LOG"
+echo "Filter Regex: $FILTER_REGEX"
+
+# --- 3. Generate Config with Safe Password Injection ---
+cat <<EOF > /app/otel-config-template.yaml
+receivers:
+  bigip:
+    endpoint: "https://${HOST}"
+    username: "${USER}"
+    password: "PLACEHOLDER_PASSWORD"
+    collection_interval: "${INTERVAL}"
+    timeout: 30s
+    tls:
+      insecure_skip_verify: ${VERIFY}
+
+processors:
+  filter:
+    metrics:
+      include:
+        match_type: regexp
+        metric_names:
+          - '${FILTER_REGEX}'
+
+exporters:
+  prometheusremotewrite:
+    endpoint: "http://127.0.0.1:9090/api/v1/write"
+    tls:
+      insecure: true
+
+service:
+  telemetry:
+    logs:
+      level: "${LOG}"
+    metrics:
+      address: "0.0.0.0:8888"    # <--- [關鍵修正] 開放 8888 讓外部除錯
+
+  pipelines:
+    metrics:
+      receivers: [bigip]
+      processors: [filter]
+      exporters: [prometheusremotewrite]
+EOF
+
+ESCAPED_PASS=$(printf '%s\n' "$PASS" | sed 's/[&/\]/\\&/g')
+sed "s/PLACEHOLDER_PASSWORD/$ESCAPED_PASS/" /app/otel-config-template.yaml > /app/otel-config.yaml
+
+echo "Starting F5 OTel Collector..."
+exec /usr/local/bin/otelcol-custom --config /app/otel-config.yaml
