@@ -1,7 +1,7 @@
-name: "F5 BIG-IP Telemetry"
-version: "0.9.6-02"
-slug: "f5_bigip_telemetry"
-description: "F5 OTel Collector (Secure Password Support)."
+name: "F5 BIG-IP Telemetry (AST+Prometheus)"
+version: "0.9.6-03"
+slug: "f5_bigip_telemetry_aio"
+description: "F5 OTel Collector + Built-in Prometheus."
 url: "https://github.com/raphael1688dev/addon-f5-ast"
 arch:
   - amd64
@@ -12,32 +12,29 @@ options:
   f5_password: "admin"
   collection_interval: "30s"
   insecure_skip_verify: true
-  
-  # Log Level: debug, info, warn, error (Empty = info)
   log_level: "info"
 
-  # --- Modules (Default False) ---
-  enable_system: false
-  enable_ltm: false
+  # --- Modules ---
+  enable_system: true
+  enable_ltm: true
+  enable_apm: true
+  enable_asm: true
+  enable_gtm: true
+  enable_afm: true
+  
   enable_net: false
-  enable_asm: false
-  enable_gtm: false
-  enable_apm: false
-  enable_afm: false
   enable_pem: false
   enable_avr: false
   enable_vcmp: false
+
 schema:
   f5_host: str
   f5_username: str
   f5_password: password
   collection_interval: str
   insecure_skip_verify: bool
-  
-  # Input for Log Level
   log_level: str
   
-  # --- Modules Schema ---
   enable_system: bool
   enable_ltm: bool
   enable_net: bool
@@ -48,5 +45,7 @@ schema:
   enable_pem: bool
   enable_avr: bool
   enable_vcmp: bool
+
 ports:
-  8888/tcp: 8888
+  8888/tcp: 8888  # OTel Metrics
+  9090/tcp: 9090  # Prometheus UI / Grafana Source
