@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "Starting F5 Telemetry All-in-One (v2.1.0 Deep Scan)..."
+echo "Starting F5 Telemetry All-in-One (v2.1.1 Final Check)..."
 
 CONFIG_PATH="/data/options.json"
 DATA_DIR="/data/prometheus"
@@ -34,7 +34,7 @@ echo "Starting Built-in Prometheus..."
 
 sleep 5
 
-# --- 2. Prepare Config Variables ---
+# --- 2. Prepare Variables ---
 HOST=$(jq --raw-output '.f5_host' $CONFIG_PATH)
 USER=$(jq --raw-output '.f5_username' $CONFIG_PATH)
 PASS=$(jq --raw-output '.f5_password' $CONFIG_PATH)
@@ -66,12 +66,12 @@ ENABLE_AFM=$(jq --raw-output '.enable_afm' $CONFIG_PATH)
 echo "Target F5: $HOST"
 echo "Log Level: $LOG"
 
-# --- [Deep Scan] Connection & Permission Diagnostics ---
+# --- [Diagnostics] ---
 echo "========================================="
-echo "   Running Deep Connection Diagnostics   "
+echo "   Running Final Connection Check        "
 echo "========================================="
 
-# 1. Login to get Token
+# 1. Login
 echo "Step 1: Attempting Login..."
 JSON_PAYLOAD=$(jq -n --arg u "$USER" --arg p "$PASS" '{username: $u, password: $p, loginProviderName: "tmos"}')
 LOGIN_RESPONSE=$(curl -k -s -w "\nHTTP_CODE:%{http_code}" --connect-timeout 10 \
@@ -83,31 +83,28 @@ LOGIN_CODE=$(echo "$LOGIN_RESPONSE" | grep "HTTP_CODE" | cut -d':' -f2)
 TOKEN=$(echo "$LOGIN_RESPONSE" | sed 's/HTTP_CODE.*//' | jq -r .token.token)
 
 if [ "$LOGIN_CODE" == "200" ] && [ "$TOKEN" != "null" ]; then
-  echo "✅ Login Successful! (Token acquired)"
+  echo "Login Successful!"
   
-  # 2. Test Data Read Permission (Reading System Hostname)
-  echo "Step 2: Testing Read Permissions (fetching /mgmt/tm/sys/global-host-name)..."
+  # 2. Test Data Read (Using a standard endpoint: global-settings)
+  echo "Step 2: Testing Read Permissions (/mgmt/tm/sys/global-settings)..."
   DATA_RESPONSE=$(curl -k -s -w "\nHTTP_CODE:%{http_code}" --connect-timeout 10 \
     -H "X-F5-Auth-Token: $TOKEN" \
-    -X GET "https://$HOST/mgmt/tm/sys/global-host-name")
+    -X GET "https://$HOST/mgmt/tm/sys/global-settings")
     
   DATA_CODE=$(echo "$DATA_RESPONSE" | grep "HTTP_CODE" | cut -d':' -f2)
   DATA_BODY=$(echo "$DATA_RESPONSE" | sed 's/HTTP_CODE.*//')
 
   if [ "$DATA_CODE" == "200" ]; then
     echo "Data Read Successful! (HTTP 200)"
-    echo "Sample Data: $(echo $DATA_BODY | jq -r .name 2>/dev/null || echo 'Raw JSON received')"
+    echo "Hostname: $(echo $DATA_BODY | jq -r .hostname 2>/dev/null)"
     echo "-----------------------------------------"
-    echo "CONCLUSION: Credentials AND Permissions are PERFECT."
-    echo "If no data in Grafana, the issue is strictly inside OTel Config/Filter."
+    echo "SYSTEM STATUS: GREEN. Starting Collector..."
   else
     echo "Data Read FAILED! (HTTP $DATA_CODE)"
     echo "Response: $DATA_BODY"
     echo "-----------------------------------------"
-    echo "CONCLUSION: Login worked, but Reading Data failed."
-    echo "Please check F5 User Role. Ensure it is 'Administrator' or has iControl REST access."
+    echo "WARNING: Login OK, but Read failed. Starting Collector anyway (logs might show errors)."
   fi
-
 else
   echo "Login FAILED with Code $LOGIN_CODE"
 fi
@@ -123,7 +120,7 @@ receivers:
     username: "${USER}"
     password: ${SAFE_PASS}
     collection_interval: "${INTERVAL}"
-    timeout: 30s
+    timeout: 60s   # <--- [升級] 增加到 60s 以防 API 回應慢
     tls:
       insecure_skip_verify: ${VERIFY}
 
