@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "Starting F5 Telemetry All-in-One (v2.1.1 Final Check)..."
+echo "Starting F5 Telemetry All-in-One (v2.1.2 Regex Fix)..."
 
 CONFIG_PATH="/data/options.json"
 DATA_DIR="/data/prometheus"
@@ -46,29 +46,38 @@ RAW_LOG=$(jq --raw-output '.log_level' $CONFIG_PATH)
 if [[ -z "$RAW_LOG" ]] || [[ "$RAW_LOG" == "null" ]]; then LOG="info"; else LOG=$(echo "$RAW_LOG" | tr '[:upper:]' '[:lower:]'); fi
 if [[ ! "$LOG" =~ ^(debug|info|warn|error)$ ]]; then LOG="info"; fi
 
-# Filter Regex
-FILTER_REGEX="bigip\.scraper.*"
+# --- [關鍵修正] Regex Generation (支援 Dot . 與 Underscore _) ---
+# 使用 [._] 來同時匹配 . 和 _
+FILTER_REGEX="bigip[._]scraper.*"
+
 ENABLE_SYSTEM=$(jq --raw-output '.enable_system' $CONFIG_PATH)
-[ "$ENABLE_SYSTEM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip\.(cpu|memory|system|disk|filesystem).*"
+[ "$ENABLE_SYSTEM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._](cpu|memory|system|disk|filesystem).*"
+
 ENABLE_LTM=$(jq --raw-output '.enable_ltm' $CONFIG_PATH)
-[ "$ENABLE_LTM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip\.(virtual_server|pool|node|rule).*"
+[ "$ENABLE_LTM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._](virtual_server|pool|node|rule).*"
+
 ENABLE_NET=$(jq --raw-output '.enable_net' $CONFIG_PATH)
-[ "$ENABLE_NET" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip\.(interface|vlan|arp).*"
+[ "$ENABLE_NET" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._](interface|vlan|arp).*"
+
 ENABLE_ASM=$(jq --raw-output '.enable_asm' $CONFIG_PATH)
-[ "$ENABLE_ASM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip\.asm.*"
+[ "$ENABLE_ASM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._]asm.*"
+
 ENABLE_GTM=$(jq --raw-output '.enable_gtm' $CONFIG_PATH)
-[ "$ENABLE_GTM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip\.(gtm|wideip|dns).*"
+[ "$ENABLE_GTM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._](gtm|wideip|dns).*"
+
 ENABLE_APM=$(jq --raw-output '.enable_apm' $CONFIG_PATH)
-[ "$ENABLE_APM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip\.(apm|access).*"
+[ "$ENABLE_APM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._](apm|access).*"
+
 ENABLE_AFM=$(jq --raw-output '.enable_afm' $CONFIG_PATH)
-[ "$ENABLE_AFM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip\.(afm|firewall|dos).*"
+[ "$ENABLE_AFM" == "true" ] && FILTER_REGEX="$FILTER_REGEX|bigip[._](afm|firewall|dos).*"
 
 echo "Target F5: $HOST"
 echo "Log Level: $LOG"
+echo "Filter Regex: $FILTER_REGEX"
 
 # --- [Diagnostics] ---
 echo "========================================="
-echo "   Running Final Connection Check        "
+echo "   Running Connection Check              "
 echo "========================================="
 
 # 1. Login
@@ -83,9 +92,9 @@ LOGIN_CODE=$(echo "$LOGIN_RESPONSE" | grep "HTTP_CODE" | cut -d':' -f2)
 TOKEN=$(echo "$LOGIN_RESPONSE" | sed 's/HTTP_CODE.*//' | jq -r .token.token)
 
 if [ "$LOGIN_CODE" == "200" ] && [ "$TOKEN" != "null" ]; then
-  echo "Login Successful!"
+  echo "✅ Login Successful!"
   
-  # 2. Test Data Read (Using a standard endpoint: global-settings)
+  # 2. Test Data Read
   echo "Step 2: Testing Read Permissions (/mgmt/tm/sys/global-settings)..."
   DATA_RESPONSE=$(curl -k -s -w "\nHTTP_CODE:%{http_code}" --connect-timeout 10 \
     -H "X-F5-Auth-Token: $TOKEN" \
@@ -95,18 +104,13 @@ if [ "$LOGIN_CODE" == "200" ] && [ "$TOKEN" != "null" ]; then
   DATA_BODY=$(echo "$DATA_RESPONSE" | sed 's/HTTP_CODE.*//')
 
   if [ "$DATA_CODE" == "200" ]; then
-    echo "Data Read Successful! (HTTP 200)"
+    echo "✅ Data Read Successful!"
     echo "Hostname: $(echo $DATA_BODY | jq -r .hostname 2>/dev/null)"
-    echo "-----------------------------------------"
-    echo "SYSTEM STATUS: GREEN. Starting Collector..."
   else
-    echo "Data Read FAILED! (HTTP $DATA_CODE)"
-    echo "Response: $DATA_BODY"
-    echo "-----------------------------------------"
-    echo "WARNING: Login OK, but Read failed. Starting Collector anyway (logs might show errors)."
+    echo "❌ Data Read FAILED! (HTTP $DATA_CODE)"
   fi
 else
-  echo "Login FAILED with Code $LOGIN_CODE"
+  echo "❌ Login FAILED with Code $LOGIN_CODE"
 fi
 echo "========================================="
 
@@ -120,7 +124,7 @@ receivers:
     username: "${USER}"
     password: ${SAFE_PASS}
     collection_interval: "${INTERVAL}"
-    timeout: 60s   # <--- [升級] 增加到 60s 以防 API 回應慢
+    timeout: 60s
     tls:
       insecure_skip_verify: ${VERIFY}
 
